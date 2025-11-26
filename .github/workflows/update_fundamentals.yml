@@ -1,9 +1,9 @@
 name: Update Fundamental Data (EPS/BV)
 
 on:
-  schedule:
-    # Run at 00:00 on the 1st day of every month
-    - cron: '0 0 1 * *'
+  # schedule:
+  #   # Run at 00:00 on the 1st day of every month
+  #   - cron: '0 0 1 * *'
   workflow_dispatch: # Allow manual trigger
 
 jobs:

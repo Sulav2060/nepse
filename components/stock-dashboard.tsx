@@ -96,25 +96,35 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
   }
 
   const triggerScraper = async () => {
-    if (!confirm("This will trigger the GitHub Action to scrape new data. It may take a few minutes. Continue?")) return
+    if (!confirm("This will trigger ALL GitHub Actions (LTP, Dividends, Fundamentals). It may take a few minutes. Continue?")) return
 
     setIsTriggering(true)
     try {
-        const res = await fetch('/api/trigger-action', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ workflow: 'update_ltp.yml' })
-        })
+        const workflows = ['update_ltp.yml', 'scrape.yml', 'update_fundamentals.yml']
         
-        if (res.ok) {
-            alert("Scraper triggered successfully! Please wait 2-3 minutes and then click 'Refresh Table'.")
+        const results = await Promise.all(workflows.map(wf => 
+            fetch('/api/trigger-action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ workflow: wf })
+            }).then(async res => {
+                if (res.ok) return { wf, status: 'ok' }
+                const json = await res.json().catch(() => ({}))
+                return { wf, status: 'failed', error: json.error }
+            })
+        ))
+        
+        const failed = results.filter(r => r.status === 'failed')
+        
+        if (failed.length === 0) {
+            alert("All scrapers triggered successfully! Please wait 2-3 minutes and then click 'Refresh Table'.")
         } else {
-            const json = await res.json()
-            alert("Failed to trigger scraper: " + (json.error || "Unknown error"))
+            const errorMsg = failed.map(f => `${f.wf}: ${f.error || 'Unknown error'}`).join('\n')
+            alert(`Failed to trigger some scrapers:\n${errorMsg}`)
         }
     } catch (e) {
         console.error(e)
-        alert("Error triggering scraper")
+        alert("Error triggering scrapers")
     } finally {
         setIsTriggering(false)
     }
