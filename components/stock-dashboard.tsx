@@ -4,7 +4,7 @@ import React, { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card, CardContent } from "@/components/ui/card"
-import { ExternalLink } from "lucide-react"
+import { ExternalLink, RefreshCw, Play } from "lucide-react"
 
 interface StockDashboardProps {
   initialData: string[][]
@@ -14,6 +14,7 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
   const [sortConfig, setSortConfig] = useState<{ key: 'symbol' | 'ltp' | 'bonus' | 'cash' | 'right' | 'year' | 'eps' | 'bv'; direction: 'asc' | 'desc' } | null>(null)
   const [tableData, setTableData] = useState<string[][]>(initialData)
   const [isLoading, setIsLoading] = useState(false)
+  const [isTriggering, setIsTriggering] = useState(false)
 
   const refreshData = async () => {
     setIsLoading(true)
@@ -94,6 +95,31 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
     }
   }
 
+  const triggerScraper = async () => {
+    if (!confirm("This will trigger the GitHub Action to scrape new data. It may take a few minutes. Continue?")) return
+
+    setIsTriggering(true)
+    try {
+        const res = await fetch('/api/trigger-action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workflow: 'update_ltp.yml' })
+        })
+        
+        if (res.ok) {
+            alert("Scraper triggered successfully! Please wait 2-3 minutes and then click 'Refresh Table'.")
+        } else {
+            const json = await res.json()
+            alert("Failed to trigger scraper: " + (json.error || "Unknown error"))
+        }
+    } catch (e) {
+        console.error(e)
+        alert("Error triggering scraper")
+    } finally {
+        setIsTriggering(false)
+    }
+  }
+
   // Sorting logic
   const sortedTableData = React.useMemo(() => {
     if (!sortConfig || tableData.length <= 1) return tableData
@@ -164,10 +190,16 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
       <div className="max-w-7xl mx-auto space-y-6">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-foreground">Live Trading Data</h1>
-          <Button onClick={refreshData} variant="outline" className="flex items-center gap-2 bg-transparent" disabled={isLoading}>
-            <ExternalLink className="h-4 w-4" />
-            {isLoading ? "Loading..." : "Update Data"}
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={triggerScraper} variant="outline" className="flex items-center gap-2" disabled={isTriggering}>
+                <Play className="h-4 w-4" />
+                {isTriggering ? "Starting..." : "Trigger Update"}
+            </Button>
+            <Button onClick={refreshData} variant="outline" className="flex items-center gap-2" disabled={isLoading}>
+                <RefreshCw className="h-4 w-4" />
+                {isLoading ? "Refreshing..." : "Refresh Table"}
+            </Button>
+          </div>
         </div>
 
         <Card>
