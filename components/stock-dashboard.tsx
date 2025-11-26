@@ -11,20 +11,22 @@ interface StockDashboardProps {
 }
 
 export default function StockDashboard({ initialData }: StockDashboardProps) {
-  const [sortConfig, setSortConfig] = useState<{ key: 'symbol' | 'ltp' | 'bonus' | 'cash' | 'right' | 'year'; direction: 'asc' | 'desc' } | null>(null)
+  const [sortConfig, setSortConfig] = useState<{ key: 'symbol' | 'ltp' | 'bonus' | 'cash' | 'right' | 'year' | 'eps' | 'bv'; direction: 'asc' | 'desc' } | null>(null)
   const [tableData, setTableData] = useState<string[][]>(initialData)
   const [isLoading, setIsLoading] = useState(false)
 
   const refreshData = async () => {
     setIsLoading(true)
     try {
-      const [tradingRes, dividendRes] = await Promise.all([
+      const [tradingRes, dividendRes, epsRes] = await Promise.all([
         fetch("/api/live-trading"),
-        fetch("/api/dividends")
+        fetch("/api/dividends"),
+        fetch("/api/eps")
       ])
 
       const tradingJson = await tradingRes.json()
       const dividendJson = await dividendRes.json()
+      const epsJson = await epsRes.json()
 
       const dividendMap = new Map<string, { totalBonus: number; totalCash: number; totalRight: number; count: number }>()
       if (dividendJson.data && Array.isArray(dividendJson.data)) {
@@ -46,16 +48,26 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
         })
       }
 
+      const epsMap = new Map<string, { eps: string; bookValue: string }>()
+      if (epsJson.data && Array.isArray(epsJson.data)) {
+          epsJson.data.forEach((item: any) => {
+              epsMap.set(item.Symbol, { eps: item.EPS, bookValue: item['Book Value'] })
+          })
+      }
+
       const mergedData = (tradingJson.data || []).map((row: string[], index: number) => {
-        if (index === 0) return [row[0], row[1], "Avg Bonus (%)", "Avg Cash (%)", "Avg Right (%)", "Years Count"]
+        if (index === 0) return [row[0], row[1], "Avg Bonus (%)", "Avg Cash (%)", "Avg Right (%)", "Years Count", "EPS", "Book Value"]
         
         const symbol = row[0]
         const dividendStats = dividendMap.get(symbol)
+        const epsStats = epsMap.get(symbol)
         
         let avgBonus = '-'
         let avgCash = '-'
         let avgRight = '-'
         let yearsCount = '-'
+        let eps = '-'
+        let bookValue = '-'
 
         if (dividendStats) {
             avgBonus = (dividendStats.totalBonus / dividendStats.count).toFixed(2)
@@ -64,7 +76,12 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
             yearsCount = dividendStats.count.toString()
         }
 
-        return [row[0], row[1], avgBonus, avgCash, avgRight, yearsCount]
+        if (epsStats) {
+            eps = epsStats.eps
+            bookValue = epsStats.bookValue
+        }
+
+        return [row[0], row[1], avgBonus, avgCash, avgRight, yearsCount, eps, bookValue]
       })
 
       setTableData(mergedData)
@@ -86,7 +103,7 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
     
     const getVal = (row: string[], idx: number) => {
         const val = row[idx]
-        if (val === '-') return -1 // Treat missing data as lowest
+        if (val === '-' || val === 'N/A') return -999999 // Treat missing data as lowest
         return parseFloat(val.replace(/[^\d.\-]/g, "")) || 0
     }
 
@@ -116,11 +133,9 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
       })
     } else if (sortConfig.key === 'right') {
       sortedRows.sort((a, b) => {
-        // Sort by string value of right share (e.g. "1:1", "1:0.5")
-        // Or maybe just presence? Let's do string sort for now.
-        if (a[4] < b[4]) return sortConfig.direction === 'asc' ? -1 : 1
-        if (a[4] > b[4]) return sortConfig.direction === 'asc' ? 1 : -1
-        return 0
+        const numA = getVal(a, 4)
+        const numB = getVal(b, 4)
+        return sortConfig.direction === 'asc' ? numA - numB : numB - numA
       })
     } else if (sortConfig.key === 'year') {
       sortedRows.sort((a, b) => {
@@ -128,6 +143,18 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
         const numB = getVal(b, 5)
         return sortConfig.direction === 'asc' ? numA - numB : numB - numA
       })
+    } else if (sortConfig.key === 'eps') {
+        sortedRows.sort((a, b) => {
+          const numA = getVal(a, 6)
+          const numB = getVal(b, 6)
+          return sortConfig.direction === 'asc' ? numA - numB : numB - numA
+        })
+    } else if (sortConfig.key === 'bv') {
+        sortedRows.sort((a, b) => {
+          const numA = getVal(a, 7)
+          const numB = getVal(b, 7)
+          return sortConfig.direction === 'asc' ? numA - numB : numB - numA
+        })
     }
     return [header, ...sortedRows]
   }, [tableData, sortConfig])
@@ -169,6 +196,12 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
                         <TableHead className="font-semibold cursor-pointer select-none" onClick={() => setSortConfig(prev => ({ key: 'year', direction: prev?.key === 'year' && prev.direction === 'asc' ? 'desc' : 'asc' }))}>
                           Years Count {sortConfig?.key === 'year' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                         </TableHead>
+                        <TableHead className="font-semibold cursor-pointer select-none" onClick={() => setSortConfig(prev => ({ key: 'eps', direction: prev?.key === 'eps' && prev.direction === 'asc' ? 'desc' : 'asc' }))}>
+                          EPS {sortConfig?.key === 'eps' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+                        </TableHead>
+                        <TableHead className="font-semibold cursor-pointer select-none" onClick={() => setSortConfig(prev => ({ key: 'bv', direction: prev?.key === 'bv' && prev.direction === 'asc' ? 'desc' : 'asc' }))}>
+                          Book Value {sortConfig?.key === 'bv' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -180,6 +213,8 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
                           <TableCell>{row[3]}</TableCell>
                           <TableCell>{row[4]}</TableCell>
                           <TableCell>{row[5]}</TableCell>
+                          <TableCell>{row[6]}</TableCell>
+                          <TableCell>{row[7]}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
