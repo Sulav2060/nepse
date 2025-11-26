@@ -1,32 +1,60 @@
 import React from "react"
 import { parse } from 'csv-parse/sync'
 import StockDashboard from "@/components/stock-dashboard"
+import fs from 'fs'
+import path from 'path'
 
 // This is a Server Component
 export default async function StockWebsite() {
   let mergedData: string[][] = []
 
   try {
-    // Fetch data directly from GitHub Raw
-    const [tradingRes, dividendRes] = await Promise.all([
-      fetch('https://raw.githubusercontent.com/Sulav2060/nepse/main/live-trading-cache.json', { cache: 'no-store' }),
-      fetch('https://raw.githubusercontent.com/Sulav2060/nepse/main/proposed_dividends_sorted.csv', { cache: 'no-store' })
-    ])
-
     let tradingData: string[][] = []
     let dividendRecords: any[] = []
 
-    if (tradingRes.ok) {
-      const json = await tradingRes.json()
-      tradingData = json.data || []
+    // 1. Get Live Trading Data (Local file first, then GitHub)
+    const localTradingPath = path.join(process.cwd(), 'live-trading-cache.json')
+    if (fs.existsSync(localTradingPath)) {
+        try {
+            const fileContent = fs.readFileSync(localTradingPath, 'utf8')
+            const json = JSON.parse(fileContent)
+            tradingData = json.data || []
+        } catch (e) {
+            console.error("Error reading local trading cache:", e)
+        }
+    }
+    
+    if (tradingData.length === 0) {
+        const tradingRes = await fetch('https://raw.githubusercontent.com/Sulav2060/nepse/main/live-trading-cache.json', { cache: 'no-store' })
+        if (tradingRes.ok) {
+            const json = await tradingRes.json()
+            tradingData = json.data || []
+        }
     }
 
-    if (dividendRes.ok) {
-      const csvText = await dividendRes.text()
-      dividendRecords = parse(csvText, {
-        columns: true,
-        skip_empty_lines: true
-      })
+    // 2. Get Dividend Data (Local file first, then GitHub)
+    const localDividendPath = path.join(process.cwd(), 'proposed_dividends_sorted.csv')
+    if (fs.existsSync(localDividendPath)) {
+        try {
+            const csvText = fs.readFileSync(localDividendPath, 'utf8')
+            dividendRecords = parse(csvText, {
+                columns: true,
+                skip_empty_lines: true
+            })
+        } catch (e) {
+            console.error("Error reading local dividend csv:", e)
+        }
+    }
+
+    if (dividendRecords.length === 0) {
+        const dividendRes = await fetch('https://raw.githubusercontent.com/Sulav2060/nepse/main/proposed_dividends_sorted.csv', { cache: 'no-store' })
+        if (dividendRes.ok) {
+            const csvText = await dividendRes.text()
+            dividendRecords = parse(csvText, {
+                columns: true,
+                skip_empty_lines: true
+            })
+        }
     }
 
     // Process Dividend Data

@@ -5,15 +5,23 @@ import { parse } from 'csv-parse/sync'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
-    // Always fetch from GitHub Raw to ensure we get the latest data committed by the scraper
-    const githubRawUrl = 'https://raw.githubusercontent.com/Sulav2060/nepse/main/proposed_dividends_sorted.csv'
-    const response = await fetch(githubRawUrl)
+    let csvData = ''
     
-    if (!response.ok) {
-      throw new Error(`Failed to fetch from GitHub: ${response.statusText}`)
+    // Check local file first
+    const localPath = path.join(process.cwd(), 'proposed_dividends_sorted.csv')
+    if (fs.existsSync(localPath)) {
+        csvData = fs.readFileSync(localPath, 'utf8')
+    } else {
+        // Fallback to GitHub Raw
+        const githubRawUrl = 'https://raw.githubusercontent.com/Sulav2060/nepse/main/proposed_dividends_sorted.csv'
+        const response = await fetch(githubRawUrl)
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch from GitHub: ${response.statusText}`)
+        }
+        
+        csvData = await response.text()
     }
-    
-    const csvData = await response.text()
 
     const records = parse(csvData, {
       columns: true,
