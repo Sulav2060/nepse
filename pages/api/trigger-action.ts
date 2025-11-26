@@ -18,6 +18,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
+    // Check for last run time to enforce rate limit (once per 24 hours)
+    const runsResponse = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/actions/workflows/${workflow}/runs?per_page=1`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    })
+
+    if (runsResponse.ok) {
+      const runsData = await runsResponse.json()
+      if (runsData.workflow_runs && runsData.workflow_runs.length > 0) {
+        const lastRun = runsData.workflow_runs[0]
+        const lastRunDate = new Date(lastRun.created_at)
+        const now = new Date()
+        const diffMs = now.getTime() - lastRunDate.getTime()
+        const diffHours = diffMs / (1000 * 60 * 60)
+
+        if (diffHours < 24) {
+           return res.status(429).json({ error: `Rate limit exceeded. Last run was ${diffHours.toFixed(1)} hours ago. Please wait 24 hours between updates.` })
+        }
+      }
+    }
+
     const response = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/actions/workflows/${workflow}/dispatches`, {
       method: 'POST',
       headers: {
