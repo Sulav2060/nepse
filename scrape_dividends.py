@@ -4,10 +4,26 @@ import time
 import os
 
 def scrape():
-    # We are switching sources, so we might want to start fresh or handle the schema change.
-    # For now, let's overwrite or handle the new columns.
     output_file = "proposed_dividends_sorted.csv"
     
+    # Load existing data to check for duplicates
+    existing_hashes = set()
+    existing_df = None
+    
+    if os.path.exists(output_file):
+        try:
+            # Read as string to ensure matching works with scraped text
+            existing_df = pd.read_csv(output_file, dtype=str)
+            for _, row in existing_df.iterrows():
+                # Create a tuple of the row values to use as a hash
+                # We strip whitespace to be safe. 
+                # Columns: Symbol, Bonus(%), Cash(%), Right Share, Fiscal Year
+                row_tuple = tuple(row.fillna('').astype(str).str.strip().values)
+                existing_hashes.add(row_tuple)
+            print(f"Loaded {len(existing_hashes)} existing rows from {output_file}.")
+        except Exception as e:
+            print(f"Error loading existing data: {e}")
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -29,6 +45,7 @@ def scrape():
         
         all_rows = []
         page_num = 1
+        stop_scraping = False
         
         while True:
             print(f"Scraping page {page_num}...")
@@ -41,7 +58,8 @@ def scrape():
             
             if not rows:
                 break
-                
+            
+            current_page_rows = []
             for row in rows:
                 cells = row.locator("td").all_text_contents()
                 cells = [c.strip() for c in cells]
@@ -69,13 +87,49 @@ def scrape():
                     if bonus == '-': bonus = '0'
                     if cash == '-': cash = '0'
                     
-                    all_rows.append({
+                    # Convert Right Share ratio to percentage
+                    # Format is usually "1:1" (100%), "1:0.5" (50%), or "-"
+                    right_share_val = '0'
+                    if right_share != '-' and ':' in right_share:
+                        try:
+                            parts = right_share.split(':')
+                            if len(parts) == 2:
+                                # Assuming format Existing:New. 
+                                # If 1:1, it's 100%. If 1:0.5, it's 50%.
+                                # So we take (New / Existing) * 100
+                                existing = float(parts[0])
+                                new_share = float(parts[1])
+                                if existing > 0:
+                                    val = (new_share / existing) * 100
+                                    right_share_val = f"{val:.2f}"
+                        except:
+                            pass
+                    
+                    # Create row dict
+                    row_data = {
                         'Symbol': symbol,
                         'Bonus(%)': bonus,
                         'Cash(%)': cash,
-                        'Right Share': right_share,
+                        'Right Share': right_share_val,
                         'Fiscal Year': fiscal_year
-                    })
+                    }
+                    
+                    # Check for duplicates
+                    # Construct tuple in the same order as CSV columns
+                    row_tuple = (symbol, bonus, cash, right_share_val, fiscal_year)
+                    
+                    if row_tuple in existing_hashes:
+                        print(f"Found existing data (Symbol: {symbol}, FY: {fiscal_year}). Stopping scrape.")
+                        stop_scraping = True
+                        break
+                    
+                    current_page_rows.append(row_data)
+            
+            if current_page_rows:
+                all_rows.extend(current_page_rows)
+            
+            if stop_scraping:
+                break
             
             # Check for Next button
             # The next button is an anchor with text "Next"
@@ -106,18 +160,24 @@ def scrape():
         browser.close()
         
         if all_rows:
-            print(f"Found {len(all_rows)} total rows.")
-            df = pd.DataFrame(all_rows)
+            print(f"Found {len(all_rows)} new rows.")
+            new_df = pd.DataFrame(all_rows)
+            
+            if existing_df is not None:
+                # Concatenate new data on top of existing data
+                final_df = pd.concat([new_df, existing_df], ignore_index=True)
+            else:
+                final_df = new_df
             
             # Sort
             print("Sorting data...")
-            df = df.sort_values(by=['Symbol', 'Fiscal Year'], ascending=[True, False])
+            final_df = final_df.sort_values(by=['Symbol', 'Fiscal Year'], ascending=[True, False])
             
-            df.to_csv(output_file, index=False)
+            final_df.to_csv(output_file, index=False)
             print(f"Saved data to {output_file}")
-            print(df.head())
+            print(final_df.head())
         else:
-            print("No data found.")
+            print("No new data found.")
 
 if __name__ == "__main__":
     scrape()

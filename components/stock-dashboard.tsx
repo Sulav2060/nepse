@@ -26,48 +26,45 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
       const tradingJson = await tradingRes.json()
       const dividendJson = await dividendRes.json()
 
-      const dividendMap = new Map<string, { totalBonus: number; totalCash: number; count: number; latestRightShare: string }>()
+      const dividendMap = new Map<string, { totalBonus: number; totalCash: number; totalRight: number; count: number }>()
       if (dividendJson.data && Array.isArray(dividendJson.data)) {
         dividendJson.data.forEach((item: any) => {
           const symbol = item.Symbol
           const bonus = parseFloat(item['Bonus(%)']) || 0
           const cash = parseFloat(item['Cash(%)']) || 0
-          const rightShare = item['Right Share'] || '-'
+          const right = parseFloat(item['Right Share']) || 0
 
           if (!dividendMap.has(symbol)) {
-            dividendMap.set(symbol, { totalBonus: 0, totalCash: 0, count: 0, latestRightShare: '-' })
+            dividendMap.set(symbol, { totalBonus: 0, totalCash: 0, totalRight: 0, count: 0 })
           }
           
           const entry = dividendMap.get(symbol)!
           entry.totalBonus += bonus
           entry.totalCash += cash
+          entry.totalRight += right
           entry.count += 1
-          
-          if (entry.latestRightShare === '-' && rightShare !== '-' && rightShare !== '0') {
-              entry.latestRightShare = rightShare
-          }
         })
       }
 
       const mergedData = (tradingJson.data || []).map((row: string[], index: number) => {
-        if (index === 0) return [row[0], row[1], "Avg Bonus (%)", "Avg Cash (%)", "Right Share", "Years Count"]
+        if (index === 0) return [row[0], row[1], "Avg Bonus (%)", "Avg Cash (%)", "Avg Right (%)", "Years Count"]
         
         const symbol = row[0]
         const dividendStats = dividendMap.get(symbol)
         
         let avgBonus = '-'
         let avgCash = '-'
-        let rightShare = '-'
+        let avgRight = '-'
         let yearsCount = '-'
 
         if (dividendStats) {
             avgBonus = (dividendStats.totalBonus / dividendStats.count).toFixed(2)
             avgCash = (dividendStats.totalCash / dividendStats.count).toFixed(2)
-            rightShare = dividendStats.latestRightShare
+            avgRight = (dividendStats.totalRight / dividendStats.count).toFixed(2)
             yearsCount = dividendStats.count.toString()
         }
 
-        return [row[0], row[1], avgBonus, avgCash, rightShare, yearsCount]
+        return [row[0], row[1], avgBonus, avgCash, avgRight, yearsCount]
       })
 
       setTableData(mergedData)
@@ -167,7 +164,7 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
                           Avg Cash (%) {sortConfig?.key === 'cash' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                         </TableHead>
                         <TableHead className="font-semibold cursor-pointer select-none" onClick={() => setSortConfig(prev => ({ key: 'right', direction: prev?.key === 'right' && prev.direction === 'asc' ? 'desc' : 'asc' }))}>
-                          Right Share {sortConfig?.key === 'right' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+                          Avg Right (%) {sortConfig?.key === 'right' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                         </TableHead>
                         <TableHead className="font-semibold cursor-pointer select-none" onClick={() => setSortConfig(prev => ({ key: 'year', direction: prev?.key === 'year' && prev.direction === 'asc' ? 'desc' : 'asc' }))}>
                           Years Count {sortConfig?.key === 'year' && (sortConfig.direction === 'asc' ? '▲' : '▼')}

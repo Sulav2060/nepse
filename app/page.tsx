@@ -30,34 +30,28 @@ export default async function StockWebsite() {
     }
 
     // Process Dividend Data
-    const dividendMap = new Map<string, { totalBonus: number; totalCash: number; count: number; latestRightShare: string }>()
+    const dividendMap = new Map<string, { totalBonus: number; totalCash: number; totalRight: number; count: number }>()
     dividendRecords.forEach((item: any) => {
       const symbol = item.Symbol
       const bonus = parseFloat(item['Bonus(%)']) || 0
       const cash = parseFloat(item['Cash(%)']) || 0
-      const rightShare = item['Right Share'] || '-'
+      const right = parseFloat(item['Right Share']) || 0
 
       if (!dividendMap.has(symbol)) {
-        dividendMap.set(symbol, { totalBonus: 0, totalCash: 0, count: 0, latestRightShare: '-' })
+        dividendMap.set(symbol, { totalBonus: 0, totalCash: 0, totalRight: 0, count: 0 })
       }
       
       const entry = dividendMap.get(symbol)!
       entry.totalBonus += bonus
       entry.totalCash += cash
+      entry.totalRight += right
       entry.count += 1
-      
-      // Since data is sorted by Fiscal Year Descending, the first non-empty right share we see is the latest?
-      // Or should we just take the very first record's right share?
-      // Let's take the first non-dash right share we find, assuming iteration order preserves sort order.
-      if (entry.latestRightShare === '-' && rightShare !== '-' && rightShare !== '0') {
-          entry.latestRightShare = rightShare
-      }
     })
 
     // Merge Data
     mergedData = tradingData.map((row: string[], index: number) => {
       if (index === 0) {
-        return [row[0], row[1], "Avg Bonus (%)", "Avg Cash (%)", "Right Share", "Years Count"]
+        return [row[0], row[1], "Avg Bonus (%)", "Avg Cash (%)", "Avg Right (%)", "Years Count"]
       }
       
       const symbol = row[0]
@@ -65,13 +59,13 @@ export default async function StockWebsite() {
       
       let avgBonus = '-'
       let avgCash = '-'
-      let rightShare = '-'
+      let avgRight = '-'
       let yearsCount = '-'
 
       if (dividendStats) {
           avgBonus = (dividendStats.totalBonus / dividendStats.count).toFixed(2)
           avgCash = (dividendStats.totalCash / dividendStats.count).toFixed(2)
-          rightShare = dividendStats.latestRightShare
+          avgRight = (dividendStats.totalRight / dividendStats.count).toFixed(2)
           yearsCount = dividendStats.count.toString()
       }
 
@@ -80,7 +74,7 @@ export default async function StockWebsite() {
         row[1], 
         avgBonus, 
         avgCash,
-        rightShare,
+        avgRight,
         yearsCount
       ]
     })
