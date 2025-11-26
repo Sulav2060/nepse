@@ -11,7 +11,7 @@ interface StockDashboardProps {
 }
 
 export default function StockDashboard({ initialData }: StockDashboardProps) {
-  const [sortConfig, setSortConfig] = useState<{ key: 'symbol' | 'ltp' | 'bonus' | 'cash' | 'year'; direction: 'asc' | 'desc' } | null>(null)
+  const [sortConfig, setSortConfig] = useState<{ key: 'symbol' | 'ltp' | 'bonus' | 'cash' | 'right' | 'year'; direction: 'asc' | 'desc' } | null>(null)
   const [tableData, setTableData] = useState<string[][]>(initialData)
   const [isLoading, setIsLoading] = useState(false)
 
@@ -26,41 +26,48 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
       const tradingJson = await tradingRes.json()
       const dividendJson = await dividendRes.json()
 
-      const dividendMap = new Map<string, { totalBonus: number; totalCash: number; count: number }>()
+      const dividendMap = new Map<string, { totalBonus: number; totalCash: number; count: number; latestRightShare: string }>()
       if (dividendJson.data && Array.isArray(dividendJson.data)) {
         dividendJson.data.forEach((item: any) => {
           const symbol = item.Symbol
           const bonus = parseFloat(item['Bonus(%)']) || 0
           const cash = parseFloat(item['Cash(%)']) || 0
+          const rightShare = item['Right Share'] || '-'
 
           if (!dividendMap.has(symbol)) {
-            dividendMap.set(symbol, { totalBonus: 0, totalCash: 0, count: 0 })
+            dividendMap.set(symbol, { totalBonus: 0, totalCash: 0, count: 0, latestRightShare: '-' })
           }
           
           const entry = dividendMap.get(symbol)!
           entry.totalBonus += bonus
           entry.totalCash += cash
           entry.count += 1
+          
+          if (entry.latestRightShare === '-' && rightShare !== '-' && rightShare !== '0') {
+              entry.latestRightShare = rightShare
+          }
         })
       }
 
       const mergedData = (tradingJson.data || []).map((row: string[], index: number) => {
-        if (index === 0) return [row[0], row[1], "Avg Bonus (%)", "Avg Cash (%)", "Years Count"]
+        if (index === 0) return [row[0], row[1], "Avg Bonus (%)", "Avg Cash (%)", "Right Share", "Years Count"]
         
         const symbol = row[0]
         const dividendStats = dividendMap.get(symbol)
         
         let avgBonus = '-'
         let avgCash = '-'
+        let rightShare = '-'
         let yearsCount = '-'
 
         if (dividendStats) {
             avgBonus = (dividendStats.totalBonus / dividendStats.count).toFixed(2)
             avgCash = (dividendStats.totalCash / dividendStats.count).toFixed(2)
+            rightShare = dividendStats.latestRightShare
             yearsCount = dividendStats.count.toString()
         }
 
-        return [row[0], row[1], avgBonus, avgCash, yearsCount]
+        return [row[0], row[1], avgBonus, avgCash, rightShare, yearsCount]
       })
 
       setTableData(mergedData)
@@ -110,10 +117,18 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
         const numB = getVal(b, 3)
         return sortConfig.direction === 'asc' ? numA - numB : numB - numA
       })
+    } else if (sortConfig.key === 'right') {
+      sortedRows.sort((a, b) => {
+        // Sort by string value of right share (e.g. "1:1", "1:0.5")
+        // Or maybe just presence? Let's do string sort for now.
+        if (a[4] < b[4]) return sortConfig.direction === 'asc' ? -1 : 1
+        if (a[4] > b[4]) return sortConfig.direction === 'asc' ? 1 : -1
+        return 0
+      })
     } else if (sortConfig.key === 'year') {
       sortedRows.sort((a, b) => {
-        const numA = getVal(a, 4)
-        const numB = getVal(b, 4)
+        const numA = getVal(a, 5)
+        const numB = getVal(b, 5)
         return sortConfig.direction === 'asc' ? numA - numB : numB - numA
       })
     }
@@ -151,6 +166,9 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
                         <TableHead className="font-semibold cursor-pointer select-none" onClick={() => setSortConfig(prev => ({ key: 'cash', direction: prev?.key === 'cash' && prev.direction === 'asc' ? 'desc' : 'asc' }))}>
                           Avg Cash (%) {sortConfig?.key === 'cash' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                         </TableHead>
+                        <TableHead className="font-semibold cursor-pointer select-none" onClick={() => setSortConfig(prev => ({ key: 'right', direction: prev?.key === 'right' && prev.direction === 'asc' ? 'desc' : 'asc' }))}>
+                          Right Share {sortConfig?.key === 'right' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+                        </TableHead>
                         <TableHead className="font-semibold cursor-pointer select-none" onClick={() => setSortConfig(prev => ({ key: 'year', direction: prev?.key === 'year' && prev.direction === 'asc' ? 'desc' : 'asc' }))}>
                           Years Count {sortConfig?.key === 'year' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                         </TableHead>
@@ -164,6 +182,7 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
                           <TableCell>{row[2]}</TableCell>
                           <TableCell>{row[3]}</TableCell>
                           <TableCell>{row[4]}</TableCell>
+                          <TableCell>{row[5]}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -171,7 +190,7 @@ export default function StockDashboard({ initialData }: StockDashboardProps) {
                 ) : (
                   <TableBody>
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                         No data available.
                       </TableCell>
                     </TableRow>

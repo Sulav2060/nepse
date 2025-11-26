@@ -4,199 +4,120 @@ import time
 import os
 
 def scrape():
-    # Load existing data to check for duplicates
-    existing_hashes = set()
-    existing_df = None
-    # Prefer the sorted file as the main database
-    csv_file = "proposed_dividends_sorted.csv"
-    if not os.path.exists(csv_file) and os.path.exists("proposed_dividends.csv"):
-        csv_file = "proposed_dividends.csv"
+    # We are switching sources, so we might want to start fresh or handle the schema change.
+    # For now, let's overwrite or handle the new columns.
+    output_file = "proposed_dividends_sorted.csv"
     
-    if os.path.exists(csv_file):
-        try:
-            # Read as string to ensure matching works with scraped text
-            existing_df = pd.read_csv(csv_file, dtype=str)
-            for _, row in existing_df.iterrows():
-                # Create a tuple of the row values to use as a hash
-                # We strip whitespace to be safe
-                row_tuple = tuple(row.fillna('').astype(str).str.strip().values)
-                existing_hashes.add(row_tuple)
-            print(f"Loaded {len(existing_hashes)} existing rows from {csv_file}.")
-        except Exception as e:
-            print(f"Error loading existing data: {e}")
-
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        print("Navigating...")
-        page.goto("https://sharehubnepal.com/investment/proposed-dividend")
+        url = "https://nepalipaisa.com/dividend"
+        print(f"Navigating to {url}...")
+        page.goto(url)
         
         print("Waiting for table...")
-        # Wait for the table to be visible and have rows
-        # Wait for a row that has text in the first cell to ensure data is loaded
-        page.wait_for_selector("table tbody tr td:first-child:not(:empty)")
-        
-        # Handle popup if present
         try:
-            # Look for a close button in a fixed overlay
-            # Common selectors for close buttons
-            close_btn = page.locator("div.fixed button svg").first
-            if close_btn.is_visible():
-                print("Closing popup...")
-                close_btn.click()
-                time.sleep(1)
-            else:
-                # Try finding text "Don't show again" and clicking it or a close icon near it
-                dont_show = page.locator("text=Don't show again")
-                if dont_show.is_visible():
-                    print("Found 'Don't show again', looking for close button...")
-                    # Usually the close button is nearby. 
-                    # Let's try to click the overlay background or look for an SVG
-                    page.mouse.click(10, 10) # Click top left to maybe close?
-                    # Or try to find a button in the same container
-        except Exception as e:
-            print(f"Popup handling error: {e}")
+            page.wait_for_selector("table", timeout=30000)
+        except:
+            print("Table not found or timeout.")
+            browser.close()
+            return
 
-        # Try to find "Items Per Page" dropdown
-        # It usually is a select element.
-        selects = page.locator("select").all()
-        print(f"Found {len(selects)} select elements.")
-        
-        items_per_page_select = None
-        for s in selects:
-            options = s.locator("option").all_text_contents()
-            print(f"Select options: {options}")
-            if "10" in options and ("20" in options or "50" in options):
-                items_per_page_select = s
-                # Try to select the largest number
-                numeric_options = [int(o) for o in options if o.isdigit()]
-                if numeric_options:
-                    max_opt = str(max(numeric_options))
-                    print(f"Selecting {max_opt} items per page...")
-                    s.select_option(max_opt)
-                    # Wait for table to reload
-                    time.sleep(5) 
-                    break
-        
         # Extract headers
-        headers = page.locator("table thead th").all_text_contents()
-        print(f"Headers: {headers}")
+        # The site has headers: Symbol, Bonus Share, Cash Dividend, Total Dividend (%), Bonus Book Close Date, Right Share, Right Book Close Date, Fiscal Year
+        # We want to map them to: Symbol, Bonus(%), Cash(%), Right Share, Fiscal Year
         
         all_rows = []
         page_num = 1
-        last_page_rows = []
-        stop_scraping = False
         
         while True:
             print(f"Scraping page {page_num}...")
-            # Extract rows
+            
+            # Wait for rows to load
+            page.wait_for_selector("table tbody tr")
+            
             rows = page.locator("table tbody tr").all()
             print(f"Found {len(rows)} rows on this page.")
             
-            current_page_rows = []
+            if not rows:
+                break
+                
             for row in rows:
                 cells = row.locator("td").all_text_contents()
                 cells = [c.strip() for c in cells]
-                if cells and any(cells):
-                    # Check if this row already exists
-                    row_tuple = tuple(cells)
-                    if row_tuple in existing_hashes:
-                        print(f"Found existing data (Symbol: {cells[0]}). Stopping scrape.")
-                        stop_scraping = True
-                        break
+                
+                # Expected index based on observation:
+                # 0: Symbol
+                # 1: Bonus Share (e.g. "0.00 %")
+                # 2: Cash Dividend (e.g. "6.40 %")
+                # 3: Total Dividend
+                # 4: Bonus Date
+                # 5: Right Share (e.g. "1:1" or "-")
+                # 6: Right Date
+                # 7: Fiscal Year
+                
+                if len(cells) >= 8:
+                    symbol = cells[0]
+                    bonus = cells[1].replace('%', '').strip()
+                    cash = cells[2].replace('%', '').strip()
+                    right_share = cells[5]
+                    fiscal_year = cells[7]
                     
-                    current_page_rows.append(cells)
-            
-            if not current_page_rows and not stop_scraping:
-                print("No rows found. Stopping.")
-                break
-            
-            # If we found some new rows, add them
-            if current_page_rows:
-                all_rows.extend(current_page_rows)
-                
-            if stop_scraping:
-                break
-                
-            # Check for duplicates (end of pagination)
-            if current_page_rows == last_page_rows:
-                print("Duplicate page detected. Stopping.")
-                break
-            
-            last_page_rows = current_page_rows
+                    # Normalize '-' to '0' for calculations, or keep as is?
+                    # The previous scraper kept them as strings.
+                    # Let's keep them as strings but clean up.
+                    if bonus == '-': bonus = '0'
+                    if cash == '-': cash = '0'
+                    
+                    all_rows.append({
+                        'Symbol': symbol,
+                        'Bonus(%)': bonus,
+                        'Cash(%)': cash,
+                        'Right Share': right_share,
+                        'Fiscal Year': fiscal_year
+                    })
             
             # Check for Next button
-            next_btn = page.locator("button[aria-label='Go to next page']")
-            if not next_btn.count():
-                 next_btn = page.locator("button:has-text('Next')")
-            if not next_btn.count():
-                 next_btn = page.locator("button:has-text('>')")
+            # The next button is an anchor with text "Next"
+            next_btn = page.locator("a:has-text('Next')")
             
-            if next_btn.count() > 0 and next_btn.is_enabled():
+            if next_btn.count() > 0 and next_btn.is_visible():
+                # Check if it's disabled? Usually class 'disabled' on li parent
+                # The HTML structure is usually ul.pagination > li > a
+                # If the parent li has class disabled, we stop.
+                parent_li = next_btn.locator("..")
+                class_attr = parent_li.get_attribute("class")
+                if class_attr and "disabled" in class_attr:
+                    print("Next button disabled. Stopping.")
+                    break
+                
                 print("Clicking Next...")
-                
-                # Try to close popup if present
-                try:
-                    close_btn = page.locator("div.fixed button svg").first
-                    if close_btn.is_visible():
-                        close_btn.click()
-                        time.sleep(0.5)
-                except:
-                    pass
-
-                try:
-                    next_btn.click(timeout=2000)
-                except:
-                    print("Click failed, trying force click...")
-                    try:
-                        page.locator("div.fixed button").first.click(timeout=1000)
-                    except:
-                        pass
-                    next_btn.click(force=True)
-                
+                next_btn.click()
                 page_num += 1
-                # Wait for table to reload. 
-                try:
-                    page.wait_for_selector("table tbody tr td:first-child:not(:empty)", timeout=5000)
-                except:
-                    print("Timeout waiting for table rows. Continuing...")
-                    time.sleep(2)
+                time.sleep(2) # Wait for AJAX load
             else:
-                print("No next button or disabled. Stopping.")
+                print("No next button found. Stopping.")
                 break
             
             # Safety break
-            if page_num > 200: 
-                print("Reached page limit.")
+            if page_num > 200:
                 break
-            
+        
         browser.close()
         
         if all_rows:
-            print(f"Found {len(all_rows)} new rows.")
-            new_df = pd.DataFrame(all_rows, columns=headers if len(headers)==len(all_rows[0]) else None)
+            print(f"Found {len(all_rows)} total rows.")
+            df = pd.DataFrame(all_rows)
             
-            if existing_df is not None:
-                # Concatenate new data on top of existing data
-                final_df = pd.concat([new_df, existing_df], ignore_index=True)
-            else:
-                final_df = new_df
+            # Sort
+            print("Sorting data...")
+            df = df.sort_values(by=['Symbol', 'Fiscal Year'], ascending=[True, False])
             
-            # Sort the data by Symbol (Asc) and Fiscal Year (Desc)
-            try:
-                if 'Symbol' in final_df.columns and 'Fiscal Year' in final_df.columns:
-                    print("Sorting data by Symbol and Fiscal Year...")
-                    final_df = final_df.sort_values(by=['Symbol', 'Fiscal Year'], ascending=[True, False])
-            except Exception as e:
-                print(f"Error sorting data: {e}")
-                
-            # Save to the sorted file
-            output_file = "proposed_dividends_sorted.csv"
-            final_df.to_csv(output_file, index=False)
-            print(f"Saved updated and sorted data to {output_file}")
-            print(final_df.head())
+            df.to_csv(output_file, index=False)
+            print(f"Saved data to {output_file}")
+            print(df.head())
         else:
-            print("No new data found.")
+            print("No data found.")
 
 if __name__ == "__main__":
     scrape()
